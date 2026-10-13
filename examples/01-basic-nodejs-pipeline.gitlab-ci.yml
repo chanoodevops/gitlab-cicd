@@ -1,0 +1,93 @@
+# ==============================================================================
+# Production Template 1: Basic Node.js Microservice Pipeline
+# Lesson Reference: notes/lesson-01-architecture-and-fundamentals.md
+# ==============================================================================
+
+stages:
+  - prepare
+  - test
+  - build
+  - package
+
+default:
+  image: node:20-alpine
+  before_script:
+    - node -v
+    - npm -v
+
+# Global Cache Definition
+cache: &global_cache
+  key:
+    files:
+      - package-lock.json
+  paths:
+    - .npm/
+    - node_modules/
+  policy: pull
+
+# ------------------------------------------------------------------------------
+# 1. Prepare Dependencies
+# ------------------------------------------------------------------------------
+deps:install:
+  stage: prepare
+  cache:
+    <<: *global_cache
+    policy: pull-push
+  script:
+    - npm ci --prefer-offline --cache .npm
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+
+# ------------------------------------------------------------------------------
+# 2. Automated Unit Tests & Code Coverage
+# ------------------------------------------------------------------------------
+test:unit:
+  stage: test
+  cache:
+    <<: *global_cache
+    policy: pull
+  script:
+    - npm test -- --coverage --ci
+  artifacts:
+    name: "coverage-$CI_COMMIT_SHORT_SHA"
+    when: always
+    expire_in: 7 days
+    reports:
+      junit: junit.xml
+      coverage_report:
+        coverage_format: cobertura
+        path: coverage/cobertura-coverage.xml
+    paths:
+      - coverage/
+
+# ------------------------------------------------------------------------------
+# 3. Production Compilation / Bundle
+# ------------------------------------------------------------------------------
+build:app:
+  stage: build
+  cache:
+    <<: *global_cache
+    policy: pull
+  script:
+    - npm run build
+  artifacts:
+    name: "dist-$CI_COMMIT_SHORT_SHA"
+    expire_in: 14 days
+    paths:
+      - dist/
+    exclude:
+      - dist/**/*.map
+
+# ------------------------------------------------------------------------------
+# 4. Packaging Release Info
+# ------------------------------------------------------------------------------
+package:release:
+  stage: package
+  dependencies:
+    - build:app
+  script:
+    - ls -la dist/
+    - echo "Packaging application build for release: $CI_COMMIT_REF_SLUG"
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'

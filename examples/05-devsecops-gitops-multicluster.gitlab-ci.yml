@@ -1,0 +1,65 @@
+# ==============================================================================
+# Production Template 5: DevSecOps Scanners, Review Apps & GitOps Deployment
+# Lesson Reference: notes/lesson-05-deployments-gitops-and-security.md
+# ==============================================================================
+
+stages:
+  - test
+  - security
+  - review
+  - staging
+  - production
+
+include:
+  - template: Jobs/Secret-Detection.gitlab-ci.yml
+  - template: Jobs/SAST.gitlab-ci.yml
+  - template: Jobs/Dependency-Scanning.gitlab-ci.yml
+
+variables:
+  SECURE_LOG_LEVEL: "info"
+  REVIEW_DOMAIN: "preview.company.com"
+
+# ------------------------------------------------------------------------------
+# Review Apps (Ephemeral Dynamic Environment)
+# ------------------------------------------------------------------------------
+deploy:review:
+  stage: review
+  image: alpine/helm:3.14.2
+  environment:
+    name: review/$CI_COMMIT_REF_SLUG
+    url: https://$CI_COMMIT_REF_SLUG.$REVIEW_DOMAIN
+    on_stop: stop:review
+    auto_stop_in: 3 days
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+  script:
+    - helm upgrade --install preview-${CI_COMMIT_REF_SLUG} ./chart -n review-${CI_COMMIT_REF_SLUG} --create-namespace
+
+stop:review:
+  stage: review
+  image: alpine/helm:3.14.2
+  environment:
+    name: review/$CI_COMMIT_REF_SLUG
+    action: stop
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      when: manual
+  script:
+    - helm uninstall preview-${CI_COMMIT_REF_SLUG} -n review-${CI_COMMIT_REF_SLUG} || true
+    - kubectl delete namespace review-${CI_COMMIT_REF_SLUG} --ignore-not-found=true
+
+# ------------------------------------------------------------------------------
+# Production Protected Gate (Manual 2-Person Approval)
+# ------------------------------------------------------------------------------
+deploy:production:
+  stage: production
+  image: alpine/helm:3.14.2
+  environment:
+    name: production
+    url: https://app.company.com
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+      when: manual
+  script:
+    - echo "Deploying to Production Cluster..."
+    - helm upgrade --install production-app ./chart -n production --set image.tag=$CI_COMMIT_SHORT_SHA

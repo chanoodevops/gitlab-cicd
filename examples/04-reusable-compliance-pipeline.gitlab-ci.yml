@@ -1,0 +1,52 @@
+# ==============================================================================
+# Production Template 4: Reusable Architecture & Job Inheritance (.base_job)
+# Lesson Reference: notes/lesson-04-reusable-architecture-and-governance.md
+# ==============================================================================
+
+stages:
+  - test
+  - deploy
+
+# ------------------------------------------------------------------------------
+# Hidden Base Jobs (Reusable Blueprint)
+# ------------------------------------------------------------------------------
+.base_security_policy:
+  image: curlimages/curl:latest
+  after_script:
+    - echo "Reporting audit compliance metadata to Security SIEM..."
+
+.base_k8s_deploy:
+  image: bitnami/kubectl:1.29
+  stage: deploy
+  timeout: 10m
+  retry:
+    max: 2
+    when:
+      - runner_system_failure
+  before_script:
+    - kubectl config set-cluster default --server="$KUBE_URL" --insecure-skip-tls-verify=true
+    - kubectl config set-credentials runner --token="$KUBE_TOKEN"
+    - kubectl config set-context default --cluster=default --user=runner
+    - kubectl config use-context default
+
+# ------------------------------------------------------------------------------
+# Concrete Jobs Inheriting from Base Templates
+# ------------------------------------------------------------------------------
+test:audit:
+  stage: test
+  extends:
+    - .base_security_policy
+  script:
+    - echo "Running baseline security and code tests..."
+
+deploy:staging:
+  extends:
+    - .base_k8s_deploy
+  variables:
+    KUBE_URL: $STAGING_KUBE_URL
+    KUBE_TOKEN: $STAGING_KUBE_TOKEN
+  script:
+    - kubectl set image deployment/app app=$CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA -n staging
+    - kubectl rollout status deployment/app -n staging
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "develop"'

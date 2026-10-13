@@ -1,0 +1,46 @@
+# ==============================================================================
+# Production Template 3: Secure Rootless Kaniko Container Build
+# Lesson Reference: notes/lesson-03-kaniko-container-builds.md
+# ==============================================================================
+
+stages:
+  - build-image
+
+variables:
+  IMAGE_NAME: "$CI_REGISTRY_IMAGE/api"
+  KANIKO_VERSION: "v1.20.0-debug"
+
+build:kaniko:
+  stage: build-image
+  image:
+    name: gcr.io/kaniko-project/executor:${KANIKO_VERSION}
+    entrypoint: [""]
+  before_script:
+    - mkdir -p /kaniko/.docker
+    - echo "{\"auths\":{\"$CI_REGISTRY\":{\"username\":\"$CI_REGISTRY_USER\",\"password\":\"$CI_REGISTRY_PASSWORD\"}}}" > /kaniko/.docker/config.json
+  script:
+    - echo "Building and publishing container image with Google Kaniko..."
+    - >-
+      /kaniko/executor
+      --context "${CI_PROJECT_DIR}"
+      --dockerfile "${CI_PROJECT_DIR}/Dockerfile"
+      --destination "${IMAGE_NAME}:${CI_COMMIT_SHORT_SHA}"
+      --destination "${IMAGE_NAME}:${CI_COMMIT_REF_SLUG}"
+      --cache=true
+      --cache-copy-layers=true
+      --cache-repo="${IMAGE_NAME}/cache"
+      --compressed-caching=false
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+    - if: '$CI_COMMIT_TAG'
+      script:
+        - mkdir -p /kaniko/.docker
+        - echo "{\"auths\":{\"$CI_REGISTRY\":{\"username\":\"$CI_REGISTRY_USER\",\"password\":\"$CI_REGISTRY_PASSWORD\"}}}" > /kaniko/.docker/config.json
+        - >-
+          /kaniko/executor
+          --context "${CI_PROJECT_DIR}"
+          --dockerfile "${CI_PROJECT_DIR}/Dockerfile"
+          --destination "${IMAGE_NAME}:${CI_COMMIT_TAG}"
+          --destination "${IMAGE_NAME}:latest"
+          --cache=true
+          --cache-repo="${IMAGE_NAME}/cache"
